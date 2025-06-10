@@ -13,8 +13,8 @@ EARTH_RADIUS = 6371000.0
 
 
 WAYPOINTS = [
-    (14.905617, 102.019044),  # Example: New York City
-    (34.0522, -118.2437), # Example: Los Angeles
+    (14.871901, 102.020667),  # Example: New York City
+     # Example: Los Angeles
    
 ]
 
@@ -29,7 +29,7 @@ class WaypointFollowerNode(Node):
 
         self.pose2d_subscriber = self.create_subscription(
             Pose2D,
-            '/gps/pose2d',  
+            '/gps/pose2d_filtered',  
             self.pose2d_callback,10
         )
 
@@ -65,12 +65,12 @@ class WaypointFollowerNode(Node):
         self.get_logger().info(f'Waypoint tolerance set to: {self.waypoint_tolerance_m} m')
 
         # Desired constant linear speed for the robot in m/s (used in Pure Pursuit).
-        self.desired_linear_speed = 0.5
+        self.desired_linear_speed = 0.3
         self.get_logger().info(f'Desired linear speed set to: {self.desired_linear_speed} m/s')
 
         # Lookahead distance for Pure Pursuit in meters.
         # This is Ld in the Pure Pursuit formula. Adjust based on robot speed and desired path smoothness.
-        self.lookahead_distance_m = 1.0
+        self.lookahead_distance_m = 2.0
         self.get_logger().info(f'Lookahead distance set to: {self.lookahead_distance_m} m')
 
         # --- Car-like Robot Specific Parameters ---

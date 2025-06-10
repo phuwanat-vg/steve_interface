@@ -6,6 +6,9 @@ from sensor_msgs.msg import NavSatFix, Imu
 from geometry_msgs.msg import Pose2D
 from geometry_msgs.msg import Quaternion # Import Quaternion for orientation
 import tf_transformations
+import tf2_ros # Import for TF broadcasting
+from nav_msgs.msg import Odometry # Import Odometry message type
+
 
 import math
 import serial
@@ -54,6 +57,17 @@ class AckermannSerialController(Node):
             self.speed_callback,
             10
         )
+
+        # Odometry variables
+        self.odom_x = 0.0
+        self.odom_y = 0.0
+        self.odom_theta = 0.0
+        self.last_odom_time = self.get_clock().now()
+        self.current_angular_vel_cmd = 0.0 #
+
+        self.odom_publisher = self.create_publisher(Odometry, 'odom/raw', 10) # Odometry publisher
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self) # TF broadcaster
+        self.steering_angle = 0.0
         
         self.gps_publisher = self.create_publisher(NavSatFix, 'gps/fix', 10)
         self.heading_imu_pub = self.create_publisher(Imu, 'imu/data', 10)
@@ -93,6 +107,7 @@ class AckermannSerialController(Node):
     def steer_callback(self, msg):
         """Direct steering angle control (in degrees, 0 = center)"""
         steering_angle = msg.data
+        
         # Convert to servo range: 0 degrees input -> 90 degrees servo (center)
         servo_angle = 90 + int(steering_angle)
         # Clamp to safe servo range (45-135 degrees)
@@ -106,6 +121,7 @@ class AckermannSerialController(Node):
 
     def send_steering_command(self, servo_angle):
         """Send steering command via serial"""
+        self.steering_angle = servo_angle - 90
         if self.ser and self.ser.is_open:
             try:
                 steer_cmd = f'SERV{servo_angle}\n'
@@ -160,31 +176,72 @@ class AckermannSerialController(Node):
                         self.gps_publisher.publish(gps_msg)
                         #self.get_logger().info(f"Published GPS: {lat}, {lon}")
 
-                if line.startswith("CMP"):
-                    heading_str = line[3:]  # Remove "CMP"
+                elif line.startswith("CMP"):
+                    
                     try:
-                        heading_deg = float(heading_str)
-                        heading_rad = math.radians(heading_deg)
-                        self.last_heading_rad = heading_rad
-                        # Create an Imu message
-                        imu_msg = Imu()
+                        # Remove "CMP" prefix and split the string by commas
+                        data_str = line[3:].strip()
+                        values = data_str.split(',')
 
-                        # Set the timestamp (important for sensor data)
-                        imu_msg.header.stamp = self.get_clock().now().to_msg()
-                        imu_msg.header.frame_id = 'base_link' # Or your appropriate frame_id
+                        # Ensure we have exactly 7 values (gx, gy, gz, ax, ay, az, heading)
+                        if len(values) == 7:
+                            gx = float(values[0])
+                            gy = float(values[1])
+                            gz = float(values[2])
+                            ax = float(values[3])
+                            ay = float(values[4])
+                            az = float(values[5])
+                            heading_deg = float(values[6])
 
-                        # Convert yaw (heading_rad) to a quaternion
-                        # This assumes your heading is yaw around the Z-axis
-                        quaternion = tf_transformations.quaternion_from_euler(0, 0, heading_rad)
-                        imu_msg.orientation.x = quaternion[0]
-                        imu_msg.orientation.y = quaternion[1]
-                        imu_msg.orientation.z = quaternion[2]
-                        imu_msg.orientation.w = quaternion[3]
+                            heading_rad = math.radians(heading_deg)
+                            self.last_heading_rad = heading_rad # Store if needed elsewhere
 
-                      
-                        imu_msg.orientation_covariance[0] = -1.0 # Indicate unknown covariance
+                            # Create an Imu message
+                            imu_msg = Imu()
 
-                        self.heading_imu_pub.publish(imu_msg)
+                            # Set the timestamp (important for sensor data)
+                            imu_msg.header.stamp = self.get_clock().now().to_msg()
+                            imu_msg.header.frame_id = 'base_link' # Or your appropriate frame_id
+
+                            # Populate angular velocity (gyroscope data)
+                            imu_msg.angular_velocity.x = gx
+                            imu_msg.angular_velocity.y = gy
+                            imu_msg.angular_velocity.z = gz
+
+                            # Populate linear acceleration (accelerometer data)
+                            imu_msg.linear_acceleration.x = ax
+                            imu_msg.linear_acceleration.y = ay
+                            imu_msg.linear_acceleration.z = az
+
+                            # Convert yaw (heading_rad) to a quaternion
+                            # This assumes your heading is yaw around the Z-axis
+                            # Ensure your coordinate systems align:
+                            # ROS convention: X-forward, Y-left, Z-up
+                            # If your heading is clockwise from North, you might need to adjust the sign.
+                            # Assuming heading_rad is counter-clockwise from X-axis (East), or North (Y-axis) in a typical setup.
+                            # Adjust Euler angles if your sensor's axes are different.
+                            quaternion = tf_transformations.quaternion_from_euler(0, 0, heading_rad)
+                            imu_msg.orientation.x = quaternion[0]
+                            imu_msg.orientation.y = quaternion[1]
+                            imu_msg.orientation.z = quaternion[2]
+                            imu_msg.orientation.w = quaternion[3]
+
+                            # Set covariance for orientation, angular velocity, and linear acceleration
+                            # -1.0 indicates "unknown/unspecified" covariance.
+                            # If you have sensor datasheets, you can provide more accurate values.
+                            imu_msg.orientation_covariance[0] = -1.0 # For x
+                            imu_msg.orientation_covariance[4] = -1.0 # For y
+                            imu_msg.orientation_covariance[8] = 0.01 # For z
+
+                            imu_msg.angular_velocity_covariance[0] = -1.0 # For x
+                            imu_msg.angular_velocity_covariance[4] = -1.0 # For y
+                            imu_msg.angular_velocity_covariance[8] = 0.0001 #or z
+
+                            imu_msg.linear_acceleration_covariance[0] = -1.0 # For x
+                            imu_msg.linear_acceleration_covariance[4] = -1.0 # For y
+                            imu_msg.linear_acceleration_covariance[8] = -1.0 # For z
+
+                            self.heading_imu_pub.publish(imu_msg)
                         #self.get_logger().info(f"Published IMU heading (rad): {heading_rad:.3f}")
 
                         if self.last_lat is not None and self.last_lon is not None:
@@ -198,6 +255,99 @@ class AckermannSerialController(Node):
                     except ValueError:
                         self.get_logger().warn(f"Invalid heading format: {heading_str}")
 
+                elif line.startswith("KIN"):
+                    try:
+                        # Parse the linear velocity reported by the Arduino
+                        reported_linear_vel = float(line[3:])
+
+                        current_time = self.get_clock().now()
+                        dt = (current_time - self.last_odom_time).nanoseconds / 1e9 # Convert to seconds
+                        self.last_odom_time = current_time
+
+                        # If dt is very small or zero, skip to avoid division by zero
+                        if dt < 1e-6:
+                            return
+
+                        # The linear velocity is directly from the Arduino
+                        vx = reported_linear_vel
+                        
+                        A = math.tan(self.steering_angle*0.5/180*3.14159)
+                        if A != 0:
+                            R = self.wheelbase/A
+                            wz = vx/R
+                        else:
+                            wz = 0.0
+                        
+                        
+
+                      
+                        delta_x = vx * math.cos(self.odom_theta) * dt
+                        delta_y = vx * math.sin(self.odom_theta) * dt
+                        delta_theta = wz * dt
+
+                        self.odom_x += delta_x
+                        self.odom_y += delta_y
+                        self.odom_theta += delta_theta
+
+                        # Normalize theta to be between -pi and pi
+                        self.odom_theta = math.atan2(math.sin(self.odom_theta), math.cos(self.odom_theta))
+
+
+                        # --- Publish Odometry Message ---
+                        odom_msg = Odometry()
+                        odom_msg.header.stamp = current_time.to_msg()
+                        odom_msg.header.frame_id = 'odom' # The fixed frame
+                        odom_msg.child_frame_id = 'base_link' # The robot's base frame
+
+                        # Set the position
+                        odom_msg.pose.pose.position.x = self.odom_x
+                        odom_msg.pose.pose.position.y = self.odom_y
+                        odom_msg.pose.pose.position.z = 0.0 # 2D robot
+
+                        # Set the orientation (from current theta)
+                        q = tf_transformations.quaternion_from_euler(0, 0, self.odom_theta)
+                        odom_msg.pose.pose.orientation.x = q[0]
+                        odom_msg.pose.pose.orientation.y = q[1]
+                        odom_msg.pose.pose.orientation.z = q[2]
+                        odom_msg.pose.pose.orientation.w = q[3]
+
+                        # Set the velocities
+                        odom_msg.twist.twist.linear.x = vx
+                        odom_msg.twist.twist.linear.y = 0.0
+                        odom_msg.twist.twist.angular.z = wz
+
+                        # Set covariance (optional, but good practice; use -1 if unknown)
+                        # A very basic guess for covariance. In a real system, these would be tuned.
+                        odom_msg.pose.covariance[0] = 0.01  # x
+                        odom_msg.pose.covariance[7] = 0.01  # y
+                        odom_msg.pose.covariance[35] = 0.02 # theta (yaw)
+                        odom_msg.twist.covariance[0] = 0.01 # vx
+                        odom_msg.twist.covariance[35] = 0.02 # wz
+
+                        self.odom_publisher.publish(odom_msg)
+                        # self.get_logger().info(f"Published Odometry: x={self.odom_x:.2f}, y={self.odom_y:.2f}, theta={self.odom_theta:.2f}, vx={vx:.2f}, wz={wz:.2f}")
+
+
+                        # --- Publish TF Transform (odom -> base_link) ---
+                        t = tf2_ros.TransformStamped()
+                        t.header.stamp = current_time.to_msg()
+                        t.header.frame_id = 'odom'
+                        t.child_frame_id = 'base_link'
+
+                        t.transform.translation.x = self.odom_x
+                        t.transform.translation.y = self.odom_y
+                        t.transform.translation.z = 0.0
+                        t.transform.rotation.x = q[0]
+                        t.transform.rotation.y = q[1]
+                        t.transform.rotation.z = q[2]
+                        t.transform.rotation.w = q[3]
+
+                        self.tf_broadcaster.sendTransform(t)
+
+                    except ValueError:
+                        self.get_logger().warn(f"Invalid KIN format: {line[3:]}")
+                    except IndexError:
+                        self.get_logger().warn(f"Incomplete KIN data received: {line}")
 
             except Exception as e:
                 self.get_logger().error(f"GPS parse error: {e}")

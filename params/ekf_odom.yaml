@@ -1,0 +1,35 @@
+ekf_filter_node_odom:
+  ros__parameters:
+    frequency: 30.0
+    sensor_timeout: 0.1
+    two_d_mode: true # Set to false if you are doing 3D navigation and care about Z
+    transform_time_offset: 0.0
+    odom_frame: odom
+    publish_tf: true
+    base_link_frame: base_link
+    world_frame: odom # This EKF estimates transform relative to the odom frame
+
+    # Input from your IMU
+    imu0: /imu/data # **CHANGE THIS TOPIC TO YOUR IMU TOPIC**
+    imu0_config: [false, false, false, # x, y, z position
+                  false, false, false, # roll, pitch, yaw position (from IMU orientation)
+                  false, false, false, # x, y, z velocity
+                  false, false, true, # roll, pitch, yaw velocity (angular rates)
+                  false, false, false] # x, y, z acceleration (linear acceleration, usually only X, Y needed for 2D)
+    imu0_queue_size: 10
+    imu0_nodelay: false
+    imu0_differential: false
+    imu0_relative: true # Often true for IMUs to integrate from start
+    imu0_remove_gravitational_acceleration: true # Recommended if IMU provides raw acceleration
+
+    # Input from your wheel odometry
+    odom0: /odom/raw # **CHANGE THIS TOPIC TO YOUR ODOMETRY TOPIC**
+    odom0_config: [true, true, false,  # x, y, z position
+                   false, false, true, # roll, pitch, yaw position (from wheel encoders)
+                   true, false, false,  # x, y, z velocity
+                   false, false, false, # roll, pitch, yaw velocity
+                   false, false, false] # x, y, z acceleration
+    odom0_queue_size: 10
+    odom0_nodelay: false
+    odom0_differential: true
+    odom0_relative: false
