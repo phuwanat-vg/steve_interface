@@ -65,7 +65,7 @@ class AckermannSerialController(Node):
         self.last_odom_time = self.get_clock().now()
         self.current_angular_vel_cmd = 0.0 #
 
-        self.odom_publisher = self.create_publisher(Odometry, 'odom/raw', 10) # Odometry publisher
+        self.odom_publisher = self.create_publisher(Odometry, 'odom', 10) # Odometry publisher
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self) # TF broadcaster
         self.steering_angle = 0.0
         
@@ -342,7 +342,7 @@ class AckermannSerialController(Node):
                         t.transform.rotation.z = q[2]
                         t.transform.rotation.w = q[3]
 
-                        self.tf_broadcaster.sendTransform(t)
+                        #self.tf_broadcaster.sendTransform(t)
 
                     except ValueError:
                         self.get_logger().warn(f"Invalid KIN format: {line[3:]}")

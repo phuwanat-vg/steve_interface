@@ -24,6 +24,11 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'logged_waypoint_follower = steve_interface.logged_waypoint_follower:main',
+            'interactive_waypoint_follower = steve_interface.interactive_waypoint_follower:main',
+            'gps_wp_logger = steve_interface.gps_wp_logger:main',
+            'main_controller = steve_interface.main_controller:main',
+            
         ],
     },
 )
